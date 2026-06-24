@@ -24,6 +24,7 @@ export interface GeneratedQuestion {
 }
 
 const MIN_CHUNK_SCORE = 0.35;
+const BATCH_SIZE = 3; // questions to request per LLM call
 
 function cleanChunkContent(content: string): string {
   return content
@@ -74,52 +75,78 @@ export async function generateQuestionsFromRAG(
   const usableChunks = relevantChunks.filter(c => c.content.trim().length >= 120);
   const pool = usableChunks.length > 0 ? usableChunks : relevantChunks;
 
+  // Run all question type configs in parallel — different types won't duplicate each other
+  const configResults = await Promise.all(
+    configs.map(cfg => generateForConfig(cfg, pool, topicHint)),
+  );
+
+  return configResults.flat();
+}
+
+// ─── Per-config generator ──────────────────────────────────────────────────────
+
+async function generateForConfig(
+  cfg: QuestionConfig,
+  pool: SearchResult[],
+  topicHint: string,
+): Promise<GeneratedQuestion[]> {
   const questions: GeneratedQuestion[] = [];
-  const MAX_RETRIES = 3;
+  const seenTexts = new Set<string>();
+  // Safety cap: allow enough attempts to fill the count even with frequent failures
+  const MAX_ATTEMPTS = Math.ceil(cfg.count / BATCH_SIZE) * 6 + 5;
+  let attempt = 0;
+  let chunkOffset = 0;
 
-  for (const cfg of configs) {
-    for (let i = 0; i < cfg.count; i++) {
-      const singleCfg = { ...cfg, count: 1 };
-      let accepted = false;
+  while (questions.length < cfg.count && attempt < MAX_ATTEMPTS) {
+    const remaining = cfg.count - questions.length;
+    const batchCount = Math.min(remaining, BATCH_SIZE);
 
-      for (let attempt = 0; attempt < MAX_RETRIES && !accepted; attempt++) {
-        const chunkIdx = (questions.length + attempt) % pool.length;
+    const chunkIdx = chunkOffset % pool.length;
+    chunkOffset++;
 
-        const combinedContent = Array.from({ length: 4 }, (_, k) =>
-          pool[(chunkIdx + k) % pool.length].content
-        ).join('\n\n');
-        const chunk = { ...pool[chunkIdx], content: combinedContent };
+    const combinedContent = Array.from({ length: 4 }, (_, k) =>
+      pool[(chunkIdx + k) % pool.length].content
+    ).join('\n\n');
+    const chunk = { ...pool[chunkIdx], content: combinedContent };
 
-        const alreadyGenerated = questions
-          .filter(q => q.question_type === cfg.type)
-          .map(q => `${q.question_text} [answer: ${q.correct_answer}]`);
-        const prompt = buildPrompt(singleCfg, chunk, topicHint, alreadyGenerated);
+    const alreadyGenerated = questions
+      .map(q => `${q.question_text} [answer: ${q.correct_answer}]`);
 
-        let rawOutput: string;
-        try {
-          rawOutput = await generate({ prompt, temperature: 0.4 + attempt * 0.1 });
-        } catch (err) {
-          console.error(`Ollama error for ${cfg.type}/${cfg.difficulty}, skipping:`, (err as any)?.message ?? err);
-          break;
-        }
+    const batchCfg = { ...cfg, count: batchCount };
+    const prompt = buildPrompt(batchCfg, chunk, topicHint, alreadyGenerated);
+    // Scale token budget with batch size
+    const maxTokens = batchCount * 350;
 
-        console.log(`[DEBUG] raw output for ${cfg.type}/${cfg.difficulty}:`, rawOutput.slice(0, 300));
-        const parsed = parseQuestions(rawOutput, singleCfg, chunk, topicHint);
-        const seenTexts = new Set(
-          questions
-            .filter(q => q.question_type === cfg.type)
-            .map(q => q.question_text.trim().toLowerCase())
-        );
-        const newQ = parsed.filter(p => !seenTexts.has(p.question_text.trim().toLowerCase()));
-
-        if (newQ.length > 0) {
-          questions.push(...newQ);
-          accepted = true;
-        } else {
-          console.warn(`Attempt ${attempt + 1} for ${cfg.type}/${cfg.difficulty} yielded no valid unique question — retrying.`);
-        }
-      }
+    let rawOutput: string;
+    try {
+      rawOutput = await generate({ prompt, temperature: 0.4 + (attempt % 3) * 0.1, maxTokens });
+    } catch (err) {
+      console.error(`Ollama error for ${cfg.type}/${cfg.difficulty}:`, (err as any)?.message ?? err);
+      attempt++;
+      continue;
     }
+
+    const parsed = parseQuestions(rawOutput, batchCfg, chunk, topicHint);
+    const newQ = parsed.filter(p => {
+      const key = p.question_text.trim().toLowerCase();
+      if (seenTexts.has(key)) return false;
+      seenTexts.add(key);
+      return true;
+    });
+
+    if (newQ.length > 0) {
+      questions.push(...newQ.slice(0, remaining));
+    } else {
+      console.warn(`Attempt ${attempt + 1} for ${cfg.type}/${cfg.difficulty} yielded no valid unique questions — retrying.`);
+    }
+
+    attempt++;
+  }
+
+  if (questions.length < cfg.count) {
+    console.warn(
+      `Could only generate ${questions.length}/${cfg.count} for ${cfg.type}/${cfg.difficulty} after ${attempt} attempts.`,
+    );
   }
 
   return questions;
@@ -134,18 +161,20 @@ function buildPrompt(
   alreadyGenerated: string[],
 ): string {
   const cleanedContent = cleanChunkContent(chunk.content).slice(0, 800);
+  const n = cfg.count;
+  const plural = n > 1;
 
   const typeInstructions: Record<QuestionType, string> = {
     multiple_choice:
-      `1 multiple choice question, 4 choices (A B C D). correct_answer is one letter: A, B, C, or D.`,
+      `${n} multiple choice question${plural ? 's' : ''}, each with 4 choices (A B C D). correct_answer is one letter: A, B, C, or D.`,
     true_or_false:
-      `1 true/false item. question_text must be a statement ending in a period (NOT a question mark). correct_answer is "True" or "False".`,
+      `${n} true/false item${plural ? 's' : ''}. question_text must be a statement ending in a period (NOT a question mark). correct_answer is "True" or "False".`,
     fill_in_the_blank:
-      `1 fill-in-the-blank statement (NOT a question). Replace one key term with ___. correct_answer is the missing word or phrase. question_text must end with a period, never a question mark.`,
+      `${n} fill-in-the-blank statement${plural ? 's' : ''} (NOT question${plural ? 's' : ''}). Replace one key term with ___. correct_answer is the missing word or phrase. question_text must end with a period, never a question mark.`,
     essay:
-      `1 open-ended essay question. correct_answer is a 2-sentence model answer using facts from the source.`,
+      `${n} open-ended essay question${plural ? 's' : ''}. correct_answer is a 2-sentence model answer using facts from the source.`,
     matching:
-      `1 matching question. Pick 4 terms from the source. question_text is "Match each term to its correct definition." choices is null. correct_answer format: term1|def1||term2|def2||term3|def3||term4|def4`,
+      `${n} matching question${plural ? 's' : ''}. Pick 4 terms from the source. question_text is "Match each term to its correct definition." choices is null. correct_answer format: term1|def1||term2|def2||term3|def3||term4|def4`,
   };
 
   const difficultyNote: Record<Difficulty, string> = {
@@ -178,7 +207,7 @@ function buildPrompt(
     `\nDIFFICULTY: ${difficultyNote[cfg.difficulty]}` +
     `\nTASK: Generate ${typeInstructions[cfg.type]}` +
     `${avoidSection}` +
-    `\nRespond with ONLY a JSON array containing exactly 1 object. Example:\n${examples[cfg.type]}` +
+    `\nRespond with ONLY a JSON array containing exactly ${n} object${plural ? 's' : ''}. Example:\n${examples[cfg.type]}` +
     `\nDo NOT include any text outside the JSON array.`;
 }
 
@@ -291,10 +320,34 @@ function parseQuestions(
 
   return items
     .filter(q => isValidQuestion(q, cfg.type))
-    .slice(0, cfg.count)
     .map(q => {
       let choices = q.choices ?? null;
       let correctAnswer = normalizeAnswer(cfg.type, String(q.correct_answer ?? ''));
+
+      // ── Normalize MCQ choices to [{key, text}] format ──────────────────────
+      if (cfg.type === 'multiple_choice' && choices) {
+        if (!Array.isArray(choices)) {
+          // Object format: {"A":"Joule","B":"Newton",...} → array
+          choices = Object.entries(choices as Record<string, string>)
+            .map(([k, v]) => ({ key: k.toUpperCase(), text: String(v) }))
+            .sort((a, b) => a.key.localeCompare(b.key));
+        } else {
+          // Array format: normalize each item in case it's a string or odd shape
+          choices = (choices as any[]).map((c, i) => {
+            if (typeof c === 'string') return { key: String.fromCharCode(65 + i), text: c };
+            if (c && typeof c === 'object') {
+              if (typeof c.key === 'string' && c.text !== undefined)
+                return { key: c.key.toUpperCase(), text: String(c.text) };
+              // e.g. {"A":"Joule"} — single-entry object
+              const entries = Object.entries(c as Record<string, unknown>);
+              if (entries.length >= 1 && /^[A-Da-d]$/.test(String(entries[0][0])))
+                return { key: String(entries[0][0]).toUpperCase(), text: String(entries[0][1]) };
+            }
+            return { key: String.fromCharCode(65 + i), text: String(c ?? '') };
+          });
+        }
+      }
+
       if (cfg.type === 'matching' && (!choices || (Array.isArray(choices) && choices.length === 0))) {
         const parsedPairs = parseMatchingPairs(correctAnswer);
         if (parsedPairs) {

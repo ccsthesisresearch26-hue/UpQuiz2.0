@@ -79,8 +79,20 @@ func (r *examRepo) ListBySubject(ctx context.Context, subjectID uuid.UUID) ([]*m
 	return exams, nil
 }
 
+func (r *examRepo) Update(ctx context.Context, id uuid.UUID, title, instructions string, timeLimitMinutes *int, passingScore *float64, randomize bool) error {
+	_, err := r.db.Exec(ctx,
+		`UPDATE exams SET title=$1,instructions=$2,time_limit_minutes=$3,passing_score=$4,randomize_questions=$5,updated_at=NOW() WHERE id=$6`,
+		title, instructions, timeLimitMinutes, passingScore, randomize, id)
+	return err
+}
+
 func (r *examRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status models.ExamStatus) error {
 	_, err := r.db.Exec(ctx, `UPDATE exams SET status=$1,updated_at=NOW() WHERE id=$2`, status, id)
+	return err
+}
+
+func (r *examRepo) Delete(ctx context.Context, id uuid.UUID) error {
+	_, err := r.db.Exec(ctx, `DELETE FROM exams WHERE id=$1`, id)
 	return err
 }
 

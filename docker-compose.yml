@@ -100,13 +100,13 @@ services:
     volumes:
       - ollama_data:/root/.ollama
     # ── NVIDIA GPU: uncomment the block below and ensure nvidia-docker is installed
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1
-    #           capabilities: [gpu]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     # ── Intel Arc / AMD: not supported by Ollama — CPU only on those GPUs
     networks:
       - examnet

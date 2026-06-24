@@ -61,8 +61,10 @@ type ExamRepository interface {
 	FindByID(ctx context.Context, id uuid.UUID) (*models.Exam, error)
 	ListBySubject(ctx context.Context, subjectID uuid.UUID) ([]*models.Exam, error)
 	ListPublishedForStudent(ctx context.Context, studentID uuid.UUID) ([]*models.Exam, error)
+	Update(ctx context.Context, id uuid.UUID, title, instructions string, timeLimitMinutes *int, passingScore *float64, randomize bool) error
 	UpdateStatus(ctx context.Context, id uuid.UUID, status models.ExamStatus) error
 	GetQuestions(ctx context.Context, examID uuid.UUID) ([]*models.GeneratedQuestion, error)
+	Delete(ctx context.Context, id uuid.UUID) error
 }
 
 // ─── Attempt ──────────────────────────────────────────────────────────────────

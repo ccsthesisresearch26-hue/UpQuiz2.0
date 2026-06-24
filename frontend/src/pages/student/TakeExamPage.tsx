@@ -1,12 +1,34 @@
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../../services/api';
 import Layout from '../../components/Layout';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { CheckCircle2, Clock, Save, Send, Loader2, BookOpen } from 'lucide-react';
 
 interface MCQChoice { key: string; text: string; }
 interface MatchPair { left: string; right: string; }
+
+/** Normalize whatever format the AI stored choices in → [{key,text},...] */
+function normalizeMCQChoices(raw: any): MCQChoice[] {
+  if (!raw) return [];
+  if (typeof raw === 'string') { try { raw = JSON.parse(raw); } catch { return []; } }
+  const byKey: Record<string, string> = {};
+  if (Array.isArray(raw)) {
+    (raw as any[]).forEach((c: any, i: number) => {
+      if (!c) return;
+      if (typeof c === 'string') { byKey[String.fromCharCode(65 + i)] = c; return; }
+      const k = String(c.key ?? c.Key ?? c.label ?? c.letter ?? c.option ?? String.fromCharCode(65 + i)).toUpperCase().trim();
+      const t = String(c.text ?? c.Text ?? c.value ?? c.Value ?? c.content ?? c.description ?? '').trim();
+      if (/^[A-D]$/.test(k) && t) byKey[k] = t;
+    });
+  } else if (typeof raw === 'object') {
+    Object.entries(raw as Record<string, unknown>).forEach(([k, v]) => {
+      const uk = k.toUpperCase().trim();
+      if (/^[A-D]$/.test(uk)) byKey[uk] = String(v ?? '').trim();
+    });
+  }
+  return ['A', 'B', 'C', 'D'].map(k => ({ key: k, text: byKey[k] ?? '' })).filter(c => c.text.length > 0);
+}
 
 interface Question {
   id: string;
@@ -19,8 +41,14 @@ interface Attempt { id: string; status: string; }
 export default function TakeExamPage() {
   const { examId } = useParams<{ examId: string }>();
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState(false);
+
+  // Track which question IDs have already been sent to fill-choices
+  // (prevents re-triggering on every re-render)
+  const attemptedFillIds = useRef<Set<string>>(new Set());
+  const [fillingIds, setFillingIds] = useState<Set<string>>(new Set());
 
   const { data: attempt } = useQuery<Attempt>({
     queryKey: ['attempt', examId],
@@ -38,6 +66,30 @@ export default function TakeExamPage() {
     const id = setInterval(() => saveAnswers(), 30_000);
     return () => clearInterval(id);
   }, [attempt, answers]);
+
+  // Auto-fill MCQ choices if any are missing (handles exams published before fill-choices ran)
+  useEffect(() => {
+    if (!questions.length) return;
+    const missing = questions.filter(q =>
+      q.question_type === 'multiple_choice' &&
+      (!q.choices || (q.choices as MCQChoice[]).length === 0) &&
+      !attemptedFillIds.current.has(q.id),
+    );
+    if (!missing.length) return;
+
+    // Mark as attempted immediately so subsequent renders don't re-trigger
+    missing.forEach(q => attemptedFillIds.current.add(q.id));
+    setFillingIds(prev => new Set([...prev, ...missing.map(q => q.id)]));
+
+    (async () => {
+      for (const q of missing) {
+        try { await api.post(`/questions/${q.id}/fill-choices`); } catch { /* best-effort */ }
+        setFillingIds(prev => { const n = new Set(prev); n.delete(q.id); return n; });
+      }
+      // Refresh exam questions so newly filled choices are shown
+      qc.invalidateQueries({ queryKey: ['exam-questions', examId] });
+    })();
+  }, [questions.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const saveAnswers = async () => {
     if (!attempt) return;
@@ -110,7 +162,7 @@ export default function TakeExamPage() {
 
           // ── Multiple Choice ─────────────────────────────────────────────
           const mcqChoices = q.question_type === 'multiple_choice'
-            ? (q.choices ?? []) as MCQChoice[]
+            ? normalizeMCQChoices(q.choices)
             : [];
 
           // ── Matching ────────────────────────────────────────────────────
@@ -151,7 +203,14 @@ export default function TakeExamPage() {
               {q.question_type === 'multiple_choice' && (
                 <div className="space-y-2 ml-10">
                   {mcqChoices.length === 0 ? (
-                    <p className="text-xs text-slate-400 italic">No choices configured for this question.</p>
+                    fillingIds.has(q.id) ? (
+                      <div className="flex items-center gap-2 py-2 text-sm text-primary-600">
+                        <Loader2 className="w-4 h-4 animate-spin flex-shrink-0" />
+                        Generating answer choices…
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-400 italic">Choices are still being generated — please refresh in a moment.</p>
+                    )
                   ) : (
                     mcqChoices.map(c => {
                       const selected = answers[q.id] === c.key;
@@ -179,6 +238,7 @@ export default function TakeExamPage() {
                   )}
                 </div>
               )}
+
 
               {/* ── True or False ── */}
               {q.question_type === 'true_or_false' && (

@@ -19,11 +19,11 @@ const (
 type QuestionType string
 
 const (
-	QTypeMultipleChoice  QuestionType = "multiple_choice"
-	QTypeTrueOrFalse     QuestionType = "true_or_false"
-	QTypeFillBlank       QuestionType = "fill_in_the_blank"
-	QTypeEssay           QuestionType = "essay"
-	QTypeMatching        QuestionType = "matching"
+	QTypeMultipleChoice QuestionType = "multiple_choice"
+	QTypeTrueOrFalse    QuestionType = "true_or_false"
+	QTypeFillBlank      QuestionType = "fill_in_the_blank"
+	QTypeEssay          QuestionType = "essay"
+	QTypeMatching       QuestionType = "matching"
 )
 
 type DifficultyLevel string
@@ -116,19 +116,19 @@ type GeneratedQuestion struct {
 }
 
 type Exam struct {
-	ID                  uuid.UUID  `json:"id"`
-	SubjectID           uuid.UUID  `json:"subject_id"`
-	CreatedBy           uuid.UUID  `json:"created_by"`
-	Title               string     `json:"title"`
-	Instructions        string     `json:"instructions"`
-	TimeLimitMinutes    *int       `json:"time_limit_minutes"`
-	PassingScore        *float64   `json:"passing_score"`
-	RandomizeQuestions  bool       `json:"randomize_questions"`
-	Status              ExamStatus `json:"status"`
-	AvailableFrom       *time.Time `json:"available_from"`
-	AvailableUntil      *time.Time `json:"available_until"`
-	CreatedAt           time.Time  `json:"created_at"`
-	UpdatedAt           time.Time  `json:"updated_at"`
+	ID                 uuid.UUID  `json:"id"`
+	SubjectID          uuid.UUID  `json:"subject_id"`
+	CreatedBy          uuid.UUID  `json:"created_by"`
+	Title              string     `json:"title"`
+	Instructions       string     `json:"instructions"`
+	TimeLimitMinutes   *int       `json:"time_limit_minutes"`
+	PassingScore       *float64   `json:"passing_score"`
+	RandomizeQuestions bool       `json:"randomize_questions"`
+	Status             ExamStatus `json:"status"`
+	AvailableFrom      *time.Time `json:"available_from"`
+	AvailableUntil     *time.Time `json:"available_until"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
 }
 
 type StudentExamAttempt struct {

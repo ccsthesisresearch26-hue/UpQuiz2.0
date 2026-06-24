@@ -121,6 +121,46 @@ func (h *ExamHandler) ListForStudent(c *gin.Context) {
 	c.JSON(http.StatusOK, exams)
 }
 
+// DELETE /api/exams/:id
+func (h *ExamHandler) Delete(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid exam id"})
+		return
+	}
+	if err := h.examRepo.Delete(c.Request.Context(), id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "exam deleted"})
+}
+
+// PUT /api/exams/:id
+func (h *ExamHandler) Update(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid exam id"})
+		return
+	}
+	var req struct {
+		Title              string   `json:"title"               binding:"required"`
+		Instructions       string   `json:"instructions"`
+		TimeLimitMinutes   *int     `json:"time_limit_minutes"`
+		PassingScore       *float64 `json:"passing_score"`
+		RandomizeQuestions bool     `json:"randomize_questions"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := h.examRepo.Update(c.Request.Context(), id, req.Title, req.Instructions,
+		req.TimeLimitMinutes, req.PassingScore, req.RandomizeQuestions); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "exam updated"})
+}
+
 // GET /api/exams/:id/questions
 func (h *ExamHandler) GetQuestions(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))

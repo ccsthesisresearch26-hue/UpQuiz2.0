@@ -55,7 +55,6 @@ func (h *SubjectHandler) List(c *gin.Context) {
 		return
 	}
 
-	// Educator: filter by their own ID
 	educatorID, _ := uuid.Parse(c.GetString("userID"))
 	if qID := c.Query("educator_id"); qID != "" {
 		parsed, err := uuid.Parse(qID)

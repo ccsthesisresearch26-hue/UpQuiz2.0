@@ -32,7 +32,6 @@ func NewAnalyticsRepo(db *pgxpool.Pool) AnalyticsRepository { return &analyticsR
 func (r *analyticsRepo) SubjectSummary(ctx context.Context, subjectID uuid.UUID) (*SubjectAnalytics, error) {
 	result := &SubjectAnalytics{TopicBreakdown: []TopicBreakdown{}}
 
-	// Average score and attempt count across all exams in the subject
 	err := r.db.QueryRow(ctx, `
 		SELECT
 			COALESCE(AVG(a.percentage), 0),
@@ -46,7 +45,6 @@ func (r *analyticsRepo) SubjectSummary(ctx context.Context, subjectID uuid.UUID)
 		return nil, err
 	}
 
-	// Topic breakdown: for each topic tag, how many answers were correct vs total
 	rows, err := r.db.Query(ctx, `
 		SELECT
 			gq.topic_tag,

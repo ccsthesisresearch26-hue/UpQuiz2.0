@@ -15,10 +15,7 @@ import ManageUsers from './pages/admin/ManageUsers';
 import EducatorDashboard from './pages/educator/EducatorDashboard';
 import SubjectsPage from './pages/educator/SubjectsPage';
 import DocumentsPage from './pages/educator/DocumentsPage';
-import GenerateQuestionsPage from './pages/educator/GenerateQuestionsPage';
-import ReviewQuestionsPage from './pages/educator/ReviewQuestionsPage';
-import CreateExamPage from './pages/educator/CreateExamPage';
-import ExamListPage from './pages/educator/ExamListPage';
+import QuestionsPage from './pages/educator/QuestionsPage';
 import AnalyticsPage from './pages/educator/AnalyticsPage';
 
 // ── Student pages ────────────────────────────────────────────
@@ -30,9 +27,6 @@ import ResultsPage from './pages/student/ResultsPage';
 // ── Layout ───────────────────────────────────────────────────
 import ProtectedRoute from './components/ProtectedRoute';
 
-// Hydrates user state from the auth_token cookie on every page load.
-// Shows a spinner while the check is in-flight so routing never sees
-// a false-null user state.
 function AuthInit({ children }: { children: ReactNode }) {
   const setUser = useAuthStore(s => s.setUser);
   const [ready, setReady] = useState(false);
@@ -40,7 +34,7 @@ function AuthInit({ children }: { children: ReactNode }) {
   useEffect(() => {
     api.get('/auth/me')
       .then(r => setUser(r.data))
-      .catch(() => {}) // 401 = no valid cookie, stay on login
+      .catch(() => {})
       .finally(() => setReady(true));
   }, []);
 
@@ -58,41 +52,43 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthInit>
-      <Routes>
-        {/* Public */}
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/register" element={<RegisterPage />} />
+        <Routes>
+          {/* Public */}
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
 
-        {/* Admin */}
-        <Route path="/admin" element={<ProtectedRoute role="admin" />}>
-          <Route index element={<AdminDashboard />} />
-          <Route path="users" element={<ManageUsers />} />
-        </Route>
+          {/* Admin */}
+          <Route path="/admin" element={<ProtectedRoute role="admin" />}>
+            <Route index element={<AdminDashboard />} />
+            <Route path="users" element={<ManageUsers />} />
+          </Route>
 
-        {/* Educator */}
-        <Route path="/educator" element={<ProtectedRoute role="educator" />}>
-          <Route index element={<EducatorDashboard />} />
-          <Route path="subjects" element={<SubjectsPage />} />
-          <Route path="subjects/:subjectId/documents" element={<DocumentsPage />} />
-          <Route path="subjects/:subjectId/generate" element={<GenerateQuestionsPage />} />
-          <Route path="subjects/:subjectId/review" element={<ReviewQuestionsPage />} />
-          <Route path="subjects/:subjectId/exams/create" element={<CreateExamPage />} />
-          <Route path="subjects/:subjectId/exams" element={<ExamListPage />} />
-          <Route path="subjects/:subjectId/analytics" element={<AnalyticsPage />} />
-        </Route>
+          {/* Educator */}
+          <Route path="/educator" element={<ProtectedRoute role="educator" />}>
+            <Route index element={<EducatorDashboard />} />
+            <Route path="subjects" element={<SubjectsPage />} />
+            <Route path="subjects/:subjectId/documents" element={<DocumentsPage />} />
+            <Route path="subjects/:subjectId/questions" element={<QuestionsPage />} />
+            <Route path="subjects/:subjectId/exams" element={<QuestionsPage />} />
+            <Route path="subjects/:subjectId/exams/create" element={<QuestionsPage />} />
+            <Route path="subjects/:subjectId/analytics" element={<AnalyticsPage />} />
+            {/* legacy */}
+            <Route path="subjects/:subjectId/generate" element={<QuestionsPage />} />
+            <Route path="subjects/:subjectId/review" element={<QuestionsPage />} />
+          </Route>
 
-        {/* Student */}
-        <Route path="/student" element={<ProtectedRoute role="student" />}>
-          <Route index element={<StudentDashboard />} />
-          <Route path="exams" element={<MyExamsPage />} />
-          <Route path="exams/:examId/take" element={<TakeExamPage />} />
-          <Route path="results/:attemptId" element={<ResultsPage />} />
-        </Route>
+          {/* Student */}
+          <Route path="/student" element={<ProtectedRoute role="student" />}>
+            <Route index element={<StudentDashboard />} />
+            <Route path="exams" element={<MyExamsPage />} />
+            <Route path="exams/:examId/take" element={<TakeExamPage />} />
+            <Route path="results/:attemptId" element={<ResultsPage />} />
+          </Route>
 
-        {/* Root redirect */}
-        <Route path="/" element={<RootRedirect />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+          {/* Root redirect */}
+          <Route path="/" element={<RootRedirect />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
       </AuthInit>
     </BrowserRouter>
   );

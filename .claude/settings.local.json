@@ -1,8 +1,23 @@
 {
   "permissions": {
     "allow": [
-      "Bash(curl -s -X POST http://localhost:8080/api/auth/login -H \"Content-Type: application/json\" -d \"{\\\\\"email\\\\\":\\\\\"admin@examplatform.local\\\\\",\\\\\"password\\\\\":\\\\\"Admin@1234\\\\\"}\")",
-      "Bash(docker exec *)"
+      "PowerShell(head -10)",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\Yonin-PC\\\\open-design\\\\design-systems\" | Select-Object -First 5 | ForEach-Object { $_.Name })",
+      "PowerShell(Get-Process | Where-Object { $_.Name -match \"open-design|OpenDesign|od-desktop|electron\" } | Select-Object Name, Id, MainWindowTitle)",
+      "Bash(npx --no -- vite --version)",
+      "Bash(npx vite *)",
+      "Bash(git -C \"c:\\\\Users\\\\Yonin-PC\\\\Documents\\\\Github\\\\UpKwiz\\\\UpQuiz2.0\" status --short)",
+      "Bash(Get-ChildItem -Path . -Force)",
+      "Bash(Select-Object Name, Mode, FullName)",
+      "Bash(Format-Table -AutoSize)",
+      "Bash(xargs wc -l)",
+      "PowerShell(Get-ChildItem -Path . -Directory | ForEach-Object { \"`n$\\($_.Name\\)\"; Get-ChildItem -Path $_.FullName -Depth 1 | Select-Object Name | ForEach-Object { \"  $\\($_.Name\\)\" } })",
+      "Bash(Remove-Item \"c:\\\\Users\\\\Yonin-PC\\\\Documents\\\\Github\\\\UpKwiz\\\\UpQuiz2.0\\\\frontend\\\\src\\\\pages\\\\educator\\\\AssignmentGroupsPage.tsx\", \"c:\\\\Users\\\\Yonin-PC\\\\Documents\\\\Github\\\\UpKwiz\\\\UpQuiz2.0\\\\frontend\\\\src\\\\pages\\\\educator\\\\GradebookPage.tsx\", \"c:\\\\Users\\\\Yonin-PC\\\\Documents\\\\Github\\\\UpKwiz\\\\UpQuiz2.0\\\\frontend\\\\src\\\\pages\\\\educator\\\\SubjectSettingsPage.tsx\", \"c:\\\\Users\\\\Yonin-PC\\\\Documents\\\\Github\\\\UpKwiz\\\\UpQuiz2.0\\\\frontend\\\\src\\\\pages\\\\educator\\\\GenerateQuestionsPage.tsx\", \"c:\\\\Users\\\\Yonin-PC\\\\Documents\\\\Github\\\\UpKwiz\\\\UpQuiz2.0\\\\frontend\\\\src\\\\pages\\\\educator\\\\ReviewQuestionsPage.tsx\", \"c:\\\\Users\\\\Yonin-PC\\\\Documents\\\\Github\\\\UpKwiz\\\\UpQuiz2.0\\\\backend\\\\internal\\\\handlers\\\\assignment_group_handler.go\", \"c:\\\\Users\\\\Yonin-PC\\\\Documents\\\\Github\\\\UpKwiz\\\\UpQuiz2.0\\\\backend\\\\internal\\\\repository\\\\assignment_group_repo.go\", \"c:\\\\Users\\\\Yonin-PC\\\\Documents\\\\Github\\\\UpKwiz\\\\UpQuiz2.0\\\\backend\\\\internal\\\\database\\\\migrate.go\")",
+      "Bash(rm \"c:/Users/Yonin-PC/Documents/Github/UpKwiz/UpQuiz2.0/frontend/src/pages/educator/AssignmentGroupsPage.tsx\" \"c:/Users/Yonin-PC/Documents/Github/UpKwiz/UpQuiz2.0/frontend/src/pages/educator/GradebookPage.tsx\" \"c:/Users/Yonin-PC/Documents/Github/UpKwiz/UpQuiz2.0/frontend/src/pages/educator/SubjectSettingsPage.tsx\" \"c:/Users/Yonin-PC/Documents/Github/UpKwiz/UpQuiz2.0/frontend/src/pages/educator/GenerateQuestionsPage.tsx\" \"c:/Users/Yonin-PC/Documents/Github/UpKwiz/UpQuiz2.0/frontend/src/pages/educator/ReviewQuestionsPage.tsx\" \"c:/Users/Yonin-PC/Documents/Github/UpKwiz/UpQuiz2.0/backend/internal/handlers/assignment_group_handler.go\" \"c:/Users/Yonin-PC/Documents/Github/UpKwiz/UpQuiz2.0/backend/internal/repository/assignment_group_repo.go\" \"c:/Users/Yonin-PC/Documents/Github/UpKwiz/UpQuiz2.0/backend/internal/database/migrate.go\")",
+      "Bash(git -C \"c:/Users/Yonin-PC/Documents/Github/UpKwiz/UpQuiz2.0\" status --short)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\Yonin-PC\\Documents\\Github\\UpKwiz\\UpQuiz2.0\\frontend\\src\\pages\\educator"
     ]
   }
 }
