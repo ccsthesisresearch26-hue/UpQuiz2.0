@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -19,17 +21,21 @@ import (
 type QuestionHandler struct {
 	questionRepo repository.QuestionRepository
 	aiServiceURL string
+	uploadsDir   string
 	httpClient   *http.Client
 }
 
 func NewQuestionHandler(questionRepo repository.QuestionRepository, cfg ...*config.Config) *QuestionHandler {
 	aiURL := "http://ai-service:3001"
+	uploadsDir := "/app/uploads"
 	if len(cfg) > 0 && cfg[0] != nil {
 		aiURL = cfg[0].AIServiceURL
+		uploadsDir = cfg[0].UploadsDir
 	}
 	return &QuestionHandler{
 		questionRepo: questionRepo,
 		aiServiceURL: aiURL,
+		uploadsDir:   uploadsDir,
 		httpClient:   &http.Client{Timeout: 5 * time.Minute},
 	}
 }
@@ -75,17 +81,27 @@ func (h *QuestionHandler) BulkCreate(c *gin.Context) {
 	}
 
 	createdBy, _ := uuid.Parse(c.GetString("userID"))
-	subjectID, _ := uuid.Parse(body.SubjectID)
+	subjectID, err := uuid.Parse(body.SubjectID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid subject_id"})
+		return
+	}
 
 	qs := make([]*models.GeneratedQuestion, 0, len(body.Questions))
 	for _, q := range body.Questions {
-		docID, _ := uuid.Parse(q.DocumentID)
+		docID, err := uuid.Parse(q.DocumentID)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid document_id"})
+			return
+		}
 		var chunkIDPtr *uuid.UUID
 		if q.ChunkID != "" {
 			cid, err := uuid.Parse(q.ChunkID)
-			if err == nil {
-				chunkIDPtr = &cid
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid chunk_id"})
+				return
 			}
+			chunkIDPtr = &cid
 		}
 
 		difficulty := models.DifficultyLevel(q.Difficulty)
@@ -290,4 +306,76 @@ func (h *QuestionHandler) Delete(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "question deleted"})
+}
+
+// POST /api/questions/:id/image
+func (h *QuestionHandler) UploadImage(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid question id"})
+		return
+	}
+
+	file, header, err := c.Request.FormFile("image")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "image file is required"})
+		return
+	}
+	defer file.Close()
+
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	allowed := map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".webp": true}
+	if !allowed[ext] {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported image type; allowed: JPG, PNG, GIF, WEBP"})
+		return
+	}
+
+	imgDir := filepath.Join(h.uploadsDir, "question-images")
+	if err := os.MkdirAll(imgDir, 0755); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not create image directory"})
+		return
+	}
+
+	filename := fmt.Sprintf("%s%s", uuid.New().String(), ext)
+	storedPath := filepath.Join(imgDir, filename)
+	if err := c.SaveUploadedFile(header, storedPath); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not save image"})
+		return
+	}
+
+	imageURL := "/uploads/question-images/" + filename
+	if err := h.questionRepo.SetImageURL(c.Request.Context(), id, &imageURL); err != nil {
+		os.Remove(storedPath)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"image_url": imageURL})
+}
+
+// DELETE /api/questions/:id/image
+func (h *QuestionHandler) RemoveImage(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid question id"})
+		return
+	}
+
+	q, err := h.questionRepo.FindByID(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "question not found"})
+		return
+	}
+
+	if q.ImageURL != nil && *q.ImageURL != "" {
+		filename := filepath.Base(*q.ImageURL)
+		os.Remove(filepath.Join(h.uploadsDir, "question-images", filename))
+	}
+
+	if err := h.questionRepo.SetImageURL(c.Request.Context(), id, nil); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "image removed"})
 }

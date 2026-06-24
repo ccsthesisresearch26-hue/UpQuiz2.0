@@ -35,8 +35,13 @@ func RequireRole(roles ...string) gin.HandlerFunc {
 		allowed[r] = true
 	}
 	return func(c *gin.Context) {
-		role, _ := c.Get("userRole")
-		if !allowed[role.(string)] {
+		roleVal, exists := c.Get("userRole")
+		if !exists {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing session role"})
+			return
+		}
+		roleStr, ok := roleVal.(string)
+		if !ok || !allowed[roleStr] {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "insufficient permissions"})
 			return
 		}

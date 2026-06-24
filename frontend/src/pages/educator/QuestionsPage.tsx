@@ -10,7 +10,7 @@ import {
   Pencil, Loader2, BookOpen, Globe, Lock, FileEdit,
   Send, RotateCcw, AlertTriangle, Clock, Percent,
   Shuffle, ClipboardCheck, CheckSquare, Square,
-  Eye, EyeOff,
+  Eye, EyeOff, ImagePlus,
 } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -32,6 +32,8 @@ interface Question {
   correct_answer: string;
   is_approved: boolean;
   choices?: MCQChoice[] | MatchPair[] | null;
+  points?: number;
+  image_url?: string | null;
 }
 
 interface EditDraft {
@@ -40,6 +42,7 @@ interface EditDraft {
   difficulty:     string;
   topic_tag:      string;
   choices:        MCQChoice[] | MatchPair[] | null;
+  image_url:      string | null;
 }
 
 interface Exam {
@@ -111,16 +114,21 @@ function ChoicesView({ q }: { q: Question }) {
     }
     // Filter out items with empty text
     items = items.filter(c => c.text.length > 0);
-    if (!items.length) return <p className="text-xs text-slate-400 mt-1.5">Answer: <span className="font-medium text-slate-600">{correct_answer}</span></p>;
+    if (!items.length) return (
+      <p className="text-xs text-amber-600 mt-1.5 flex items-center gap-1">
+        <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
+        Choices missing — click <strong>Edit</strong> to fix manually
+      </p>
+    );
     return (
       <div className="mt-2 space-y-1">
         {items.map(c => (
           <div key={c.key} className={`flex items-start gap-2 text-xs rounded px-2 py-1 ${
-            correct_answer === c.key ? 'bg-emerald-50 border border-emerald-200 text-emerald-800' : 'bg-slate-50 text-slate-600'
+            correct_answer === c.key ? 'bg-primary-50 border border-primary-200 text-primary-800' : 'bg-slate-50 text-slate-600'
           }`}>
             <span className="font-bold w-4 flex-shrink-0">{c.key}.</span>
             <span className="flex-1">{c.text}</span>
-            {correct_answer === c.key && <span className="text-emerald-600 font-semibold flex-shrink-0">✓</span>}
+            {correct_answer === c.key && <span className="text-primary-600 font-semibold flex-shrink-0">✓</span>}
           </div>
         ))}
       </div>
@@ -130,8 +138,10 @@ function ChoicesView({ q }: { q: Question }) {
     return (
       <div className="mt-2 flex gap-2">
         {['True', 'False'].map(opt => (
-          <span key={opt} className={`text-xs rounded px-3 py-1 font-medium ${
-            correct_answer === opt ? 'bg-emerald-50 border border-emerald-200 text-emerald-800' : 'bg-slate-50 text-slate-400'
+          <span key={opt} className={`text-xs rounded-lg px-3 py-1 font-medium border ${
+            correct_answer === opt
+              ? 'bg-primary-50 border-primary-200 text-primary-800'
+              : 'bg-slate-50 border-slate-200 text-slate-400'
           }`}>
             {correct_answer === opt && '✓ '}{opt}
           </span>
@@ -155,10 +165,41 @@ function ChoicesView({ q }: { q: Question }) {
     );
   }
   if (question_type === 'essay') {
+    const alts = Array.isArray(choices) ? (choices as any[]).filter((c: any) => c?.text && !c.key && !c.left) : [];
+    return (
+      <div className="mt-1.5 space-y-1.5">
+        <div>
+          <p className="text-xs text-slate-400 font-medium mb-0.5">Model Answer:</p>
+          <p className="text-xs text-slate-600 leading-relaxed">{correct_answer}</p>
+        </div>
+        {alts.length > 0 && (
+          <div>
+            <p className="text-xs text-slate-400 font-medium mb-0.5">Also Accept:</p>
+            <div className="flex flex-wrap gap-1">
+              {alts.map((a: any, i: number) => (
+                <span key={i} className="text-xs bg-slate-50 border border-slate-200 rounded px-2 py-0.5 text-slate-600">{a.text}</span>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+  if (question_type === 'fill_in_the_blank') {
+    const alts = Array.isArray(choices) ? (choices as any[]).filter((c: any) => c?.text && !c.key && !c.left) : [];
     return (
       <div className="mt-1.5">
-        <p className="text-xs text-slate-400 font-medium mb-0.5">Model Answer:</p>
-        <p className="text-xs text-slate-600 leading-relaxed">{correct_answer}</p>
+        <p className="text-xs text-slate-400">Answer: <span className="font-medium text-slate-600">{correct_answer}</span></p>
+        {alts.length > 0 && (
+          <div className="mt-1">
+            <p className="text-xs text-slate-400 font-medium mb-0.5">Also Accept:</p>
+            <div className="flex flex-wrap gap-1">
+              {alts.map((a: any, i: number) => (
+                <span key={i} className="text-xs bg-slate-50 border border-slate-200 rounded px-2 py-0.5 text-slate-600">{a.text}</span>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -265,19 +306,66 @@ function AnswerEditor({ questionType, draft, setDraft }: {
     );
   }
   if (questionType === 'essay') {
+    const alts = (Array.isArray(draft.choices) ? draft.choices as {text:string}[] : [])
+      .filter((a: any) => typeof a === 'object' && 'text' in a && !('key' in a) && !('left' in a));
     return (
-      <div>
-        <label className="text-xs text-slate-500 font-medium mb-1 block">Model Answer</label>
-        <textarea rows={4} className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary-300 resize-none"
-          value={draft.correct_answer} onChange={e => setDraft(d => ({ ...d, correct_answer: e.target.value }))} />
+      <div className="space-y-3">
+        <div>
+          <label className="text-xs text-slate-500 font-medium mb-1 block">Model Answer</label>
+          <textarea rows={4} className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary-300 resize-none"
+            value={draft.correct_answer} onChange={e => setDraft(d => ({ ...d, correct_answer: e.target.value }))} />
+        </div>
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <label className="text-xs text-slate-500 font-medium">Also Accept <span className="font-normal text-slate-400">(optional key points)</span></label>
+            <button type="button" onClick={() => setDraft(d => ({ ...d, choices: [...alts, { text: '' }] as any }))}
+              className="text-xs text-primary-600 hover:text-primary-700 font-semibold">+ Add</button>
+          </div>
+          {alts.map((a, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <input className="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-1.5 outline-none focus:ring-2 focus:ring-primary-300"
+                placeholder="Alternative acceptable answer…" value={a.text}
+                onChange={e => { const u = alts.map((item, j) => j === i ? { text: e.target.value } : item); setDraft(d => ({ ...d, choices: u as any })); }} />
+              <button type="button" onClick={() => setDraft(d => ({ ...d, choices: alts.filter((_, j) => j !== i) as any }))}
+                className="text-slate-300 hover:text-red-400 text-lg leading-none">×</button>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  if (questionType === 'fill_in_the_blank') {
+    const alts = (Array.isArray(draft.choices) ? draft.choices as {text:string}[] : [])
+      .filter((a: any) => typeof a === 'object' && 'text' in a && !('key' in a) && !('left' in a));
+    return (
+      <div className="space-y-3">
+        <div>
+          <label className="text-xs text-slate-500 font-medium mb-1 block">Answer (word/phrase for the blank)</label>
+          <input className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary-300"
+            value={draft.correct_answer} onChange={e => setDraft(d => ({ ...d, correct_answer: e.target.value }))} />
+        </div>
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <label className="text-xs text-slate-500 font-medium">Also Accept <span className="font-normal text-slate-400">(optional)</span></label>
+            <button type="button" onClick={() => setDraft(d => ({ ...d, choices: [...alts, { text: '' }] as any }))}
+              className="text-xs text-primary-600 hover:text-primary-700 font-semibold">+ Add</button>
+          </div>
+          {alts.map((a, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <input className="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-1.5 outline-none focus:ring-2 focus:ring-primary-300"
+                placeholder="Also accept this answer…" value={a.text}
+                onChange={e => { const u = alts.map((item, j) => j === i ? { text: e.target.value } : item); setDraft(d => ({ ...d, choices: u as any })); }} />
+              <button type="button" onClick={() => setDraft(d => ({ ...d, choices: alts.filter((_, j) => j !== i) as any }))}
+                className="text-slate-300 hover:text-red-400 text-lg leading-none">×</button>
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
   return (
     <div>
-      <label className="text-xs text-slate-500 font-medium mb-1 block">
-        {questionType === 'fill_in_the_blank' ? 'Answer (word/phrase for the blank)' : 'Correct Answer'}
-      </label>
+      <label className="text-xs text-slate-500 font-medium mb-1 block">Correct Answer</label>
       <input className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-primary-300"
         value={draft.correct_answer} onChange={e => setDraft(d => ({ ...d, correct_answer: e.target.value }))} />
     </div>
@@ -311,8 +399,9 @@ export default function QuestionsPage() {
   // ── Review state ──
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isFillingChoices, setIsFillingChoices] = useState(false);
+  const [fillChoicesError, setFillChoicesError] = useState<string | null>(null);
   const [draft, setDraft] = useState<EditDraft>({
-    question_text: '', correct_answer: '', difficulty: '', topic_tag: '', choices: null,
+    question_text: '', correct_answer: '', difficulty: '', topic_tag: '', choices: null, image_url: null,
   });
 
   // ── Save / auto-fill progress state ──
@@ -323,6 +412,11 @@ export default function QuestionsPage() {
   // ── Exam state ──
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [confirmDeleteExamId, setConfirmDeleteExamId] = useState<string | null>(null);
+  const [deleteExamError, setDeleteExamError] = useState<string | null>(null);
+  const [replacingQId, setReplacingQId] = useState<string | null>(null);
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+  const [editingPointsId, setEditingPointsId] = useState<string | null>(null);
+  const [pointsByDifficulty, setPointsByDifficulty] = useState<Record<string, number>>({ easy: 1, medium: 2, hard: 3 });
   const [selectedExamQIDs, setSelectedExamQIDs] = useState<Set<string>>(new Set());
   const [examCreateError, setExamCreateError] = useState('');
   const [openExamId, setOpenExamId] = useState<string | null>(null);
@@ -386,7 +480,7 @@ export default function QuestionsPage() {
     (async () => {
       for (let i = 0; i < missing.length; i++) {
         setAutoFillStatus(`Filling MCQ choices ${i + 1} / ${missing.length}…`);
-        try { await api.post(`/questions/${missing[i].id}/fill-choices`); } catch { /* best-effort */ }
+        try { await api.post(`/questions/${missing[i].id}/fill-choices`, undefined, { timeout: 120_000 }); } catch { /* best-effort */ }
         qc.invalidateQueries({ queryKey: ['questions', subjectId] });
       }
       setAutoFillStatus(null);
@@ -421,7 +515,7 @@ export default function QuestionsPage() {
 
       for (let i = 0; i < needFill.length; i++) {
         setAutoFillStatus(`Generating MCQ choices ${i + 1} / ${needFill.length}…`);
-        try { await api.post(`/questions/${needFill[i].id}/fill-choices`); } catch { /* skip individual failures */ }
+        try { await api.post(`/questions/${needFill[i].id}/fill-choices`, undefined, { timeout: 120_000 }); } catch { /* skip individual failures */ }
       }
     },
     onSuccess: () => {
@@ -460,6 +554,29 @@ export default function QuestionsPage() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['questions', subjectId] }); setEditingId(null); },
   });
 
+  const uploadImageMutation = useMutation({
+    mutationFn: ({ questionId, file }: { questionId: string; file: File }) => {
+      const fd = new FormData();
+      fd.append('image', file);
+      return api.post(`/questions/${questionId}/image`, fd, { timeout: 60_000 });
+    },
+    onSuccess: (res, { questionId }) => {
+      const imageUrl: string = res.data.image_url;
+      setDraft(d => ({ ...d, image_url: imageUrl }));
+      qc.setQueryData<Question[]>(['questions', subjectId], old =>
+        old?.map(q => q.id === questionId ? { ...q, image_url: imageUrl } : q) ?? old);
+    },
+  });
+
+  const removeImageMutation = useMutation({
+    mutationFn: (questionId: string) => api.delete(`/questions/${questionId}/image`),
+    onSuccess: (_, questionId) => {
+      setDraft(d => ({ ...d, image_url: null }));
+      qc.setQueryData<Question[]>(['questions', subjectId], old =>
+        old?.map(q => q.id === questionId ? { ...q, image_url: null } : q) ?? old);
+    },
+  });
+
   // ── Exam mutations ──
   const { register: regExam, handleSubmit: submitExam, reset: resetExam } = useForm<ExamFormData>({
     defaultValues: { randomize_questions: true },
@@ -488,7 +605,18 @@ export default function QuestionsPage() {
 
   const deleteExamMutation = useMutation({
     mutationFn: (id: string) => api.delete(`/exams/${id}`),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['exams', subjectId] }); setConfirmDeleteExamId(null); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['exams', subjectId] });
+      setConfirmDeleteExamId(null);
+      setDeleteExamError(null);
+      setOpenExamId(null);
+    },
+    onError: (err: any) => {
+      const msg = err.response?.data?.error
+        ?? (typeof err.response?.data === 'string' && err.response.data ? err.response.data : null)
+        ?? `Failed to delete exam (${err.response?.status ?? 'no response'}). Please try again.`;
+      setDeleteExamError(msg);
+    },
   });
 
   const updateExamMutation = useMutation({
@@ -501,6 +629,32 @@ export default function QuestionsPage() {
         randomize_questions: data.randomize_questions,
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['exams', subjectId] }),
+  });
+
+  const replaceQuestionMutation = useMutation({
+    mutationFn: ({ oldQId, newQId }: { oldQId: string; newQId: string }) =>
+      api.patch(`/exams/${openExamId}/questions`, { old_question_id: oldQId, new_question_id: newQId }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['exam-questions-preview', openExamId] });
+      setReplacingQId(null);
+    },
+  });
+
+  const updatePointsMutation = useMutation({
+    mutationFn: ({ questionId, points }: { questionId: string; points: number }) =>
+      api.patch(`/exams/${openExamId}/questions/${questionId}/points`, { points }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['exam-questions-preview', openExamId] }),
+  });
+
+  const deleteAllMutation = useMutation({
+    mutationFn: async () => {
+      await Promise.all(savedQuestions.map(q => api.delete(`/questions/${q.id}`)));
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['questions', subjectId] });
+      setConfirmDeleteAll(false);
+      setEditingId(null);
+    },
   });
 
   const { data: previewQuestions = [], isLoading: previewLoading } = useQuery<Question[]>({
@@ -543,7 +697,9 @@ export default function QuestionsPage() {
       : (q.choices ?? null) as any;
 
     setEditingId(q.id);
-    setDraft({ question_text: q.question_text, correct_answer: q.correct_answer, difficulty: q.difficulty, topic_tag: q.topic_tag, choices });
+    setFillChoicesError(null);
+    setReplacingQId(null);
+    setDraft({ question_text: q.question_text, correct_answer: q.correct_answer, difficulty: q.difficulty, topic_tag: q.topic_tag, choices, image_url: q.image_url ?? null });
 
     // Auto-fill AI choices if MCQ has none yet
     if (q.question_type === 'multiple_choice' && !hasValidChoices(q)) {
@@ -553,10 +709,10 @@ export default function QuestionsPage() {
 
   const fillChoicesForEdit = async (qId: string) => {
     setIsFillingChoices(true);
+    setFillChoicesError(null);
     try {
-      const res = await api.post(`/questions/${qId}/fill-choices`);
+      const res = await api.post(`/questions/${qId}/fill-choices`, undefined, { timeout: 120_000 });
       const filled = buildMCQChoices(res.data.choices);
-      // Backend detects the correct letter and returns it as correct_key
       const correctKey: string | undefined = res.data.correct_key;
       if (filled.some(c => c.text.trim())) {
         setDraft(d => ({
@@ -569,9 +725,14 @@ export default function QuestionsPage() {
             ? { ...item, choices: res.data.choices, correct_answer: correctKey ?? item.correct_answer }
             : item) ?? old
         );
+      } else {
+        setFillChoicesError('AI could not generate valid choices. Try again or edit manually.');
       }
-    } catch { /* keep whatever is in draft */ }
-    finally { setIsFillingChoices(false); }
+    } catch (err: any) {
+      setFillChoicesError(err.response?.data?.error ?? 'Failed to generate choices. The AI service may be unavailable.');
+    } finally {
+      setIsFillingChoices(false);
+    }
   };
 
   // Exam question selection helpers
@@ -583,6 +744,11 @@ export default function QuestionsPage() {
 
   const onCreateExam = (data: ExamFormData, publish: boolean) => {
     setExamCreateError('');
+    const weights: Record<string, number> = {};
+    Array.from(selectedExamQIDs).forEach(id => {
+      const q = savedQuestions.find(sq => sq.id === id);
+      if (q) weights[id] = pointsByDifficulty[q.difficulty] ?? 1;
+    });
     createExamMutation.mutate({
       body: {
         subject_id: subjectId,
@@ -592,6 +758,7 @@ export default function QuestionsPage() {
         passing_score: data.passing_score !== '' ? Number(data.passing_score) : null,
         randomize_questions: data.randomize_questions,
         question_ids: Array.from(selectedExamQIDs),
+        question_weights: weights,
       },
       publish,
     });
@@ -757,22 +924,60 @@ export default function QuestionsPage() {
                     <p className="font-semibold text-slate-800">{generated.length} Questions Generated</p>
                     <p className="text-xs text-slate-400 mt-0.5">Review below, then save to your question bank</p>
                   </div>
-                  <button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending} className="btn-success text-sm">
-                    {saveMutation.isPending
-                      ? <><Loader2 className="w-4 h-4 animate-spin" /> {autoFillStatus ?? 'Saving…'}</>
-                      : <><Save className="w-4 h-4" /> Save Questions</>}
-                  </button>
+                  <div className="flex gap-2">
+                    <button onClick={() => generateMutation.mutate()} disabled={generateMutation.isPending || saveMutation.isPending}
+                      className="btn-secondary text-sm">
+                      {generateMutation.isPending
+                        ? <><Loader2 className="w-4 h-4 animate-spin" /> Regenerating…</>
+                        : <><RotateCcw className="w-4 h-4" /> Regenerate All</>}
+                    </button>
+                    <button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || generateMutation.isPending} className="btn-success text-sm">
+                      {saveMutation.isPending
+                        ? <><Loader2 className="w-4 h-4 animate-spin" /> {autoFillStatus ?? 'Saving…'}</>
+                        : <><Save className="w-4 h-4" /> Save Questions</>}
+                    </button>
+                  </div>
                 </div>
                 {generated.map((q, i) => (
                   <div key={i} className="card animate-slide-up">
-                    <div className="flex flex-wrap gap-1.5 mb-2.5">
-                      <span className="text-xs text-slate-400 font-medium">#{i + 1}</span>
-                      <span className={`badge ${typeColors[q.question_type] ?? 'bg-slate-100 text-slate-600'}`}>{typeLabel[q.question_type] ?? q.question_type}</span>
-                      <span className={`badge ${diffColors[q.difficulty] ?? 'bg-slate-100 text-slate-600'} capitalize`}><Gauge className="w-3 h-3" /> {q.difficulty}</span>
-                      {q.topic_tag && <span className="badge bg-violet-50 text-violet-600"><Tag className="w-3 h-3" /> {q.topic_tag}</span>}
+                    <div className="flex items-start justify-between gap-2 mb-2.5">
+                      <div className="flex flex-wrap gap-1.5">
+                        <span className="text-xs text-slate-400 font-medium">#{i + 1}</span>
+                        <span className={`badge ${typeColors[q.question_type] ?? 'bg-slate-100 text-slate-600'}`}>{typeLabel[q.question_type] ?? q.question_type}</span>
+                        <span className={`badge ${diffColors[q.difficulty] ?? 'bg-slate-100 text-slate-600'} capitalize`}><Gauge className="w-3 h-3" /> {q.difficulty}</span>
+                        {q.topic_tag && <span className="badge bg-violet-50 text-violet-600"><Tag className="w-3 h-3" /> {q.topic_tag}</span>}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setGenerated(prev => prev.filter((_, idx) => idx !== i))}
+                        className="flex-shrink-0 p-1 rounded-lg text-slate-300 hover:text-red-400 hover:bg-red-50 transition-colors"
+                        title="Remove this question">
+                        <X className="w-4 h-4" />
+                      </button>
                     </div>
                     <p className="text-sm font-medium text-slate-800 leading-relaxed mb-1.5">{q.question_text}</p>
-                    <p className="text-xs text-slate-400">Answer: <span className="text-slate-600 font-semibold">{q.correct_answer}</span></p>
+                    {q.question_type === 'multiple_choice' && Array.isArray(q.choices) && (q.choices as any[]).some((c: any) => (c?.text ?? '').trim().length > 0) ? (
+                      <div className="mt-1.5 space-y-1">
+                        {(q.choices as any[]).filter((c: any) => (c?.text ?? '').trim().length > 0).map((c: any, idx: number) => {
+                          const key = String(c.key ?? String.fromCharCode(65 + idx)).toUpperCase();
+                          const text = String(c.text ?? '').trim();
+                          const isCorrect =
+                            String(q.correct_answer ?? '').toUpperCase() === key ||
+                            String(q.correct_answer ?? '').toLowerCase().trim() === text.toLowerCase();
+                          return (
+                            <div key={key} className={`flex items-start gap-2 text-xs rounded px-2 py-1 ${
+                              isCorrect ? 'bg-primary-50 border border-primary-200 text-primary-800' : 'bg-slate-50 text-slate-600'
+                            }`}>
+                              <span className="font-bold w-4 flex-shrink-0">{key}.</span>
+                              <span className="flex-1">{text}</span>
+                              {isCorrect && <span className="text-primary-600 font-semibold flex-shrink-0">✓</span>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-400 mt-1">Answer: <span className="text-slate-600 font-semibold">{q.correct_answer}</span></p>
+                    )}
                   </div>
                 ))}
               </div>
@@ -817,6 +1022,39 @@ export default function QuestionsPage() {
             </div>
           ) : (
             <div className="space-y-3">
+              {/* ── Batch actions header ── */}
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-slate-500">
+                  {savedQuestions.length} question{savedQuestions.length !== 1 ? 's' : ''} · {savedQuestions.filter(q => q.is_approved).length} approved
+                </p>
+                <div className="flex gap-2">
+                  {savedQuestions.some(q => !q.is_approved) && (
+                    <button type="button" onClick={() => approveAllMutation.mutate()} disabled={approveAllMutation.isPending}
+                      className="btn-success text-xs py-1.5 px-3">
+                      <CheckCircle2 className="w-3.5 h-3.5" /> {approveAllMutation.isPending ? 'Approving…' : 'Approve All'}
+                    </button>
+                  )}
+                  <button type="button" onClick={() => setConfirmDeleteAll(true)}
+                    className="btn-danger text-xs py-1.5 px-3">
+                    <Trash2 className="w-3.5 h-3.5" /> Delete All
+                  </button>
+                </div>
+              </div>
+              {confirmDeleteAll && (
+                <div className="flex flex-col gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5 animate-slide-up">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0" />
+                    <p className="text-xs text-red-700 flex-1">Delete all <strong>{savedQuestions.length} questions</strong>? This cannot be undone.</p>
+                    <button type="button" onClick={() => deleteAllMutation.mutate()} disabled={deleteAllMutation.isPending}
+                      className="text-xs font-semibold text-white bg-red-500 hover:bg-red-600 px-2.5 py-1 rounded-lg transition-colors disabled:opacity-60">
+                      {deleteAllMutation.isPending ? 'Deleting…' : 'Delete All'}
+                    </button>
+                    <button type="button" onClick={() => setConfirmDeleteAll(false)}
+                      className="text-xs font-medium text-slate-500 hover:text-slate-700 px-2 py-1">Cancel</button>
+                  </div>
+                </div>
+              )}
+
               {savedQuestions.map((q, i) => {
                 const isEditing = editingId === q.id;
                 return (
@@ -848,16 +1086,53 @@ export default function QuestionsPage() {
                               <>
                                 <AnswerEditor questionType={editingQuestion?.question_type ?? ''} draft={draft} setDraft={setDraft} />
                                 {editingQuestion?.question_type === 'multiple_choice' && (
-                                  <button type="button"
-                                    onClick={() => editingId && fillChoicesForEdit(editingId)}
-                                    disabled={isFillingChoices}
-                                    className="text-xs text-primary-600 hover:text-primary-700 font-semibold flex items-center gap-1 self-start">
-                                    <Sparkles className="w-3.5 h-3.5" />
-                                    {isFillingChoices ? 'Generating…' : 'Re-generate choices with AI'}
-                                  </button>
+                                  <div className="flex flex-col gap-1">
+                                    <button type="button"
+                                      onClick={() => editingId && fillChoicesForEdit(editingId)}
+                                      disabled={isFillingChoices}
+                                      className="text-xs text-primary-600 hover:text-primary-700 font-semibold flex items-center gap-1 self-start">
+                                      <Sparkles className="w-3.5 h-3.5" />
+                                      {isFillingChoices ? 'Generating…' : 'Re-generate choices with AI'}
+                                    </button>
+                                    {fillChoicesError && <p className="text-xs text-red-500">{fillChoicesError}</p>}
+                                  </div>
                                 )}
                               </>
                             )}
+                            {/* ── Image upload ── */}
+                            <div>
+                              <label className="text-xs text-slate-500 font-medium mb-1.5 block">
+                                Context Image <span className="font-normal text-slate-400">(optional)</span>
+                              </label>
+                              {draft.image_url ? (
+                                <div className="relative inline-block">
+                                  <img src={draft.image_url} alt="Question context"
+                                    className="rounded-lg max-h-40 object-contain border border-slate-200 bg-slate-50" />
+                                  <button
+                                    type="button"
+                                    onClick={() => editingId && removeImageMutation.mutate(editingId)}
+                                    disabled={removeImageMutation.isPending}
+                                    className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 hover:bg-red-600 rounded-full text-white flex items-center justify-center disabled:opacity-60">
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <label className={`inline-flex items-center gap-1.5 text-xs font-semibold cursor-pointer ${
+                                  uploadImageMutation.isPending ? 'text-slate-400 cursor-not-allowed' : 'text-primary-600 hover:text-primary-700'
+                                }`}>
+                                  {uploadImageMutation.isPending
+                                    ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Uploading…</>
+                                    : <><ImagePlus className="w-3.5 h-3.5" /> Upload image</>}
+                                  <input type="file" accept="image/jpeg,image/png,image/gif,image/webp"
+                                    className="hidden" disabled={uploadImageMutation.isPending}
+                                    onChange={e => {
+                                      const file = e.target.files?.[0];
+                                      if (file && editingId) uploadImageMutation.mutate({ questionId: editingId, file });
+                                      e.target.value = '';
+                                    }} />
+                                </label>
+                              )}
+                            </div>
                             <div className="flex gap-2">
                               <div className="flex-1">
                                 <label className="text-xs text-slate-500 font-medium mb-1 block">Difficulty</label>
@@ -878,6 +1153,10 @@ export default function QuestionsPage() {
                         ) : (
                           <>
                             <p className="text-slate-800 text-sm font-medium leading-relaxed mb-1">{q.question_text}</p>
+                            {q.image_url && (
+                              <img src={q.image_url} alt="Question context"
+                                className="rounded-lg max-h-48 w-auto object-contain border border-slate-100 bg-slate-50 mt-1.5 mb-2" />
+                            )}
                             <ChoicesView q={q} />
                           </>
                         )}
@@ -976,6 +1255,24 @@ export default function QuestionsPage() {
                       </div>
                     </div>
                   </label>
+
+                  {/* Points per difficulty */}
+                  <div>
+                    <p className="text-xs text-slate-500 font-medium mb-1.5">Default points per question</p>
+                    <div className="flex gap-2">
+                      {(['easy', 'medium', 'hard'] as const).map(d => (
+                        <label key={d} className="flex-1">
+                          <span className={`text-xs font-medium capitalize ${diffColors[d].replace('bg-', 'text-').split(' ')[0].replace('text-', '')} ${diffColors[d].split(' ')[1]}`}>{d}</span>
+                          <input type="number" min={0.5} step={0.5}
+                            className="input text-sm mt-0.5 w-full"
+                            value={pointsByDifficulty[d]}
+                            onChange={e => setPointsByDifficulty(prev => ({ ...prev, [d]: Math.max(0.5, Number(e.target.value) || 0.5) }))}
+                          />
+                        </label>
+                      ))}
+                    </div>
+                    <p className="text-xs text-slate-400 mt-1">Applied per question when creating the exam</p>
+                  </div>
 
                   {examCreateError && (
                     <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-3 py-2.5">
@@ -1142,7 +1439,11 @@ export default function QuestionsPage() {
                           </button>
                         )}
                         <button
-                          onClick={() => setConfirmDeleteExamId(confirmDeleteExamId === e.id ? null : e.id)}
+                          onClick={() => {
+                            if (openExamId === e.id) setOpenExamId(null);
+                            setConfirmDeleteExamId(e.id);
+                            setDeleteExamError(null);
+                          }}
                           className="p-1.5 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors"
                           title="Delete exam">
                           <Trash2 className="w-4 h-4" />
@@ -1214,11 +1515,30 @@ export default function QuestionsPage() {
                                   <div key={pq.id} className={`rounded-xl px-3 py-2.5 border transition-colors ${isEditingThis ? 'bg-white border-primary-200' : 'bg-slate-50 border-transparent'}`}>
                                     <div className="flex items-start justify-between gap-2">
                                       <div className="flex-1 min-w-0">
-                                        <div className="flex flex-wrap gap-1 mb-1">
+                                        <div className="flex flex-wrap gap-1 mb-1 items-center">
                                           <span className="text-xs text-slate-400">#{pi + 1}</span>
                                           <span className={`badge text-xs ${typeColors[pq.question_type] ?? 'bg-slate-100 text-slate-600'}`}>{typeLabel[pq.question_type] ?? pq.question_type}</span>
                                           <span className={`badge text-xs ${diffColors[pq.difficulty] ?? 'bg-slate-100 text-slate-600'} capitalize`}>{pq.difficulty}</span>
                                           {pq.is_approved && <span className="badge text-xs bg-emerald-100 text-emerald-700"><CheckCircle className="w-3 h-3" /> Approved</span>}
+                                          {/* Editable points */}
+                                          {editingPointsId === pq.id ? (
+                                            <input type="number" min={0.5} step={0.5} autoFocus
+                                              className="w-16 text-xs border border-primary-300 rounded px-1.5 py-0.5 outline-none focus:ring-1 focus:ring-primary-400"
+                                              defaultValue={pq.points ?? 1}
+                                              onBlur={e => {
+                                                const pts = parseFloat(e.target.value);
+                                                if (!isNaN(pts) && pts >= 0.5) updatePointsMutation.mutate({ questionId: pq.id, points: pts });
+                                                setEditingPointsId(null);
+                                              }}
+                                              onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setEditingPointsId(null); }}
+                                            />
+                                          ) : (
+                                            <button type="button" title="Click to edit points"
+                                              onClick={() => setEditingPointsId(pq.id)}
+                                              className="badge text-xs bg-violet-50 text-violet-700 hover:bg-violet-100 cursor-pointer">
+                                              {pq.points ?? 1} pt{(pq.points ?? 1) !== 1 ? 's' : ''}
+                                            </button>
+                                          )}
                                         </div>
                                         {isEditingThis ? (
                                           <div className="space-y-3 mt-1">
@@ -1238,13 +1558,16 @@ export default function QuestionsPage() {
                                               <>
                                                 <AnswerEditor questionType={pq.question_type} draft={draft} setDraft={setDraft} />
                                                 {pq.question_type === 'multiple_choice' && (
-                                                  <button type="button"
-                                                    onClick={() => fillChoicesForEdit(pq.id)}
-                                                    disabled={isFillingChoices}
-                                                    className="text-xs text-primary-600 hover:text-primary-700 font-semibold flex items-center gap-1">
-                                                    <Sparkles className="w-3.5 h-3.5" />
-                                                    {isFillingChoices ? 'Generating…' : 'Re-generate choices with AI'}
-                                                  </button>
+                                                  <div className="flex flex-col gap-1">
+                                                    <button type="button"
+                                                      onClick={() => fillChoicesForEdit(pq.id)}
+                                                      disabled={isFillingChoices}
+                                                      className="text-xs text-primary-600 hover:text-primary-700 font-semibold flex items-center gap-1">
+                                                      <Sparkles className="w-3.5 h-3.5" />
+                                                      {isFillingChoices ? 'Generating…' : 'Re-generate choices with AI'}
+                                                    </button>
+                                                    {fillChoicesError && <p className="text-xs text-red-500">{fillChoicesError}</p>}
+                                                  </div>
                                                 )}
                                               </>
                                             )}
@@ -1281,19 +1604,65 @@ export default function QuestionsPage() {
                                         ) : (
                                           <>
                                             <p className="text-xs text-slate-700 leading-snug">{pq.question_text}</p>
+                                            {pq.image_url && (
+                                              <img src={pq.image_url} alt="Question context"
+                                                className="rounded-lg max-h-32 w-auto object-contain border border-slate-100 bg-slate-50 mt-1 mb-1" />
+                                            )}
                                             <ChoicesView q={pq} />
                                           </>
                                         )}
                                       </div>
                                       {!isEditingThis && (
-                                        <button
-                                          onClick={() => startEdit(pq)}
-                                          className="flex-shrink-0 p-1.5 rounded-lg text-slate-300 hover:text-primary-600 hover:bg-primary-50 transition-colors"
-                                          title="Edit question">
-                                          <Pencil className="w-3.5 h-3.5" />
-                                        </button>
+                                        <div className="flex gap-1 flex-shrink-0">
+                                          <button
+                                            onClick={() => { setReplacingQId(replacingQId === pq.id ? null : pq.id); setEditingId(null); setFillChoicesError(null); }}
+                                            className={`p-1.5 rounded-lg transition-colors ${replacingQId === pq.id ? 'text-amber-600 bg-amber-50' : 'text-slate-300 hover:text-amber-600 hover:bg-amber-50'}`}
+                                            title="Replace with question from bank">
+                                            <RotateCcw className="w-3.5 h-3.5" />
+                                          </button>
+                                          <button
+                                            onClick={() => { startEdit(pq); setReplacingQId(null); }}
+                                            className="p-1.5 rounded-lg text-slate-300 hover:text-primary-600 hover:bg-primary-50 transition-colors"
+                                            title="Edit question">
+                                            <Pencil className="w-3.5 h-3.5" />
+                                          </button>
+                                        </div>
                                       )}
                                     </div>
+                                    {!isEditingThis && replacingQId === pq.id && (() => {
+                                      const inExam = new Set(previewQuestions.map(q => q.id));
+                                      const bank = savedQuestions.filter(q => q.is_approved && !inExam.has(q.id));
+                                      return (
+                                        <div className="mt-3 border-t border-amber-100 pt-3">
+                                          <p className="text-xs text-amber-700 font-semibold mb-2 flex items-center gap-1.5">
+                                            <RotateCcw className="w-3.5 h-3.5" />
+                                            Select replacement from question bank
+                                          </p>
+                                          {bank.length === 0 ? (
+                                            <p className="text-xs text-slate-400 italic">No other approved questions available.</p>
+                                          ) : (
+                                            <div className="space-y-1 max-h-52 overflow-y-auto pr-1">
+                                              {bank.map(bq => (
+                                                <button key={bq.id} type="button"
+                                                  onClick={() => replaceQuestionMutation.mutate({ oldQId: pq.id, newQId: bq.id })}
+                                                  disabled={replaceQuestionMutation.isPending}
+                                                  className="w-full text-left text-xs px-3 py-2 rounded-lg bg-white border border-slate-200 hover:border-amber-300 hover:bg-amber-50 transition-colors disabled:opacity-60">
+                                                  <div className="flex items-center gap-1.5 mb-0.5">
+                                                    <span className={`badge text-xs ${typeColors[bq.question_type] ?? 'bg-slate-100 text-slate-600'}`}>{typeLabel[bq.question_type] ?? bq.question_type}</span>
+                                                    <span className={`badge text-xs ${diffColors[bq.difficulty] ?? 'bg-slate-100 text-slate-600'} capitalize`}>{bq.difficulty}</span>
+                                                  </div>
+                                                  <p className="text-slate-700 leading-snug line-clamp-2">{bq.question_text}</p>
+                                                </button>
+                                              ))}
+                                            </div>
+                                          )}
+                                          <button type="button" onClick={() => setReplacingQId(null)}
+                                            className="mt-2 text-xs text-slate-400 hover:text-slate-600">
+                                            Cancel
+                                          </button>
+                                        </div>
+                                      );
+                                    })()}
                                   </div>
                                 );
                               })}
@@ -1305,17 +1674,22 @@ export default function QuestionsPage() {
 
                     {/* ── Delete confirm ── */}
                     {confirmDeleteExamId === e.id && (
-                      <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5 animate-slide-up">
-                        <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0" />
-                        <p className="text-xs text-red-700 flex-1">Delete <strong>{e.title}</strong>? This cannot be undone.</p>
-                        <button onClick={() => deleteExamMutation.mutate(e.id)} disabled={deleteExamMutation.isPending}
-                          className="text-xs font-semibold text-white bg-red-500 hover:bg-red-600 px-2.5 py-1 rounded-lg transition-colors">
-                          {deleteExamMutation.isPending ? 'Deleting…' : 'Delete'}
-                        </button>
-                        <button onClick={() => setConfirmDeleteExamId(null)}
-                          className="text-xs font-medium text-slate-500 hover:text-slate-700 px-2 py-1">
-                          Cancel
-                        </button>
+                      <div className="flex flex-col gap-2 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5 animate-slide-up">
+                        <div className="flex items-center gap-2">
+                          <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0" />
+                          <p className="text-xs text-red-700 flex-1">Delete <strong>{e.title}</strong>? This cannot be undone.</p>
+                          <button type="button" onClick={() => deleteExamMutation.mutate(e.id)} disabled={deleteExamMutation.isPending}
+                            className="text-xs font-semibold text-white bg-red-500 hover:bg-red-600 px-2.5 py-1 rounded-lg transition-colors disabled:opacity-60">
+                            {deleteExamMutation.isPending ? 'Deleting…' : 'Delete'}
+                          </button>
+                          <button type="button" onClick={() => { setConfirmDeleteExamId(null); setDeleteExamError(null); }}
+                            className="text-xs font-medium text-slate-500 hover:text-slate-700 px-2 py-1">
+                            Cancel
+                          </button>
+                        </div>
+                        {deleteExamError && (
+                          <p className="text-xs text-red-600 pl-6">{deleteExamError}</p>
+                        )}
                       </div>
                     )}
                   </div>

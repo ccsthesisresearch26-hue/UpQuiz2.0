@@ -28,6 +28,7 @@ const BATCH_SIZE = 3; // questions to request per LLM call
 
 function cleanChunkContent(content: string): string {
   return content
+    // Publisher / copyright boilerplate
     .replace(/electronics fundamentals\s+\d+\w*\s+edition\s+floyd\/buchla/gi, '')
     .replace(/©\s*\d{4}\s+[^.]{0,80}reserved\./gi, '')
     .replace(/all rights reserved\.?/gi, '')
@@ -35,6 +36,11 @@ function cleanChunkContent(content: string): string {
     .replace(/mcgraw[-\s]?hill[^.]*\./gi, '')
     .replace(/cengage learning[^.]*\./gi, '')
     .replace(/pearson education[^.]*\./gi, '')
+    // PDF slide / presentation artifacts
+    .replace(/\bpage\s+\d+\b/gi, '')
+    .replace(/\bslide\s+\d+\b/gi, '')
+    .replace(/▪|►|▶|●|•|–|—/g, ' ')
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, ' ')  // strip control chars only
     .replace(/chapter\s+\d+\s*/gi, '')
     .replace(/\s{2,}/g, ' ')
     .trim();
@@ -81,6 +87,41 @@ export async function generateQuestionsFromRAG(
   );
 
   return configResults.flat();
+}
+
+// ─── MCQ choice generator (fallback when LLM skips choices) ──────────────────
+
+async function generateChoices(
+  questionText: string,
+  correctAnswer: string,
+): Promise<{ key: string; text: string }[] | null> {
+  const prompt =
+    `Generate exactly 4 multiple-choice answer options (A, B, C, D) for the question below.\n` +
+    `One option MUST be: "${correctAnswer}"\n` +
+    `The other 3 should be plausible but incorrect.\n` +
+    `Keep each option under 10 words.\n` +
+    `Write all options in ENGLISH only.\n` +
+    `Output ONLY a JSON array, no extra text.\n` +
+    `Example: [{"key":"A","text":"First"},{"key":"B","text":"Second"},{"key":"C","text":"Third"},{"key":"D","text":"Fourth"}]\n\n` +
+    `Question: "${questionText}"`;
+
+  try {
+    const raw = await generate({ prompt, temperature: 0.5, maxTokens: 300 });
+    // Use the same robust extractor as the main parser
+    const parsed = extractJSON(raw);
+    if (!Array.isArray(parsed) || parsed.length < 2) return null;
+    const choices = parsed
+      .map((c: any, i: number) => ({
+        key: String(c.key ?? String.fromCharCode(65 + i)).toUpperCase(),
+        text: String(c.text ?? c.value ?? '').trim(),
+      }))
+      .filter((c: any) => c.text.length > 0)
+      .slice(0, 4);
+    while (choices.length < 4) choices.push({ key: String.fromCharCode(65 + choices.length), text: '' });
+    return choices;
+  } catch {
+    return null;
+  }
 }
 
 // ─── Per-config generator ──────────────────────────────────────────────────────
@@ -149,6 +190,35 @@ async function generateForConfig(
     );
   }
 
+  // For MCQ: ensure every question has 4 choices. Small models often skip them.
+  if (cfg.type === 'multiple_choice') {
+    for (const q of questions) {
+      const hasValidChoices = Array.isArray(q.choices) && q.choices.length >= 4 &&
+        (q.choices as any[]).every((c: any) => c.text && c.text.trim().length > 0);
+      if (!hasValidChoices) {
+        // When correct_answer is already a letter key (e.g. "B"), look up the actual
+        // answer text from any partial choices so the fallback prompt is meaningful.
+        let answerText = q.correct_answer;
+        if (/^[A-D]$/i.test(q.correct_answer) && Array.isArray(q.choices)) {
+          const partial = (q.choices as any[]).find(
+            (c: any) => String(c.key ?? '').toUpperCase() === q.correct_answer.toUpperCase(),
+          );
+          if (partial?.text) answerText = partial.text;
+        }
+
+        const generated = await generateChoices(q.question_text, answerText);
+        if (generated) {
+          q.choices = generated;
+          // Resolve correct_answer to the key matching answerText in the new choices
+          const match = generated.find(
+            c => c.text.toLowerCase().trim() === answerText.toLowerCase().trim(),
+          );
+          if (match) q.correct_answer = match.key;
+        }
+      }
+    }
+  }
+
   return questions;
 }
 
@@ -166,7 +236,7 @@ function buildPrompt(
 
   const typeInstructions: Record<QuestionType, string> = {
     multiple_choice:
-      `${n} multiple choice question${plural ? 's' : ''}, each with 4 choices (A B C D). correct_answer is one letter: A, B, C, or D.`,
+      `${n} multiple choice question${plural ? 's' : ''}, each with 4 choices (A B C D). correct_answer is the FULL TEXT of the correct option, not a letter.`,
     true_or_false:
       `${n} true/false item${plural ? 's' : ''}. question_text must be a statement ending in a period (NOT a question mark). correct_answer is "True" or "False".`,
     fill_in_the_blank:
@@ -190,7 +260,7 @@ function buildPrompt(
 
   const examples: Record<QuestionType, string> = {
     multiple_choice:
-      `[{"question_text":"What is the SI unit of force?","question_type":"multiple_choice","difficulty":"easy","topic_tag":"units","correct_answer":"B","choices":[{"key":"A","text":"Joule"},{"key":"B","text":"Newton"},{"key":"C","text":"Pascal"},{"key":"D","text":"Watt"}]}]`,
+      `[{"question_text":"What is the SI unit of force?","question_type":"multiple_choice","difficulty":"easy","topic_tag":"units","correct_answer":"Newton","choices":[{"key":"A","text":"Joule"},{"key":"B","text":"Newton"},{"key":"C","text":"Pascal"},{"key":"D","text":"Watt"}]}]`,
     true_or_false:
       `[{"question_text":"The newton is the SI unit of force.","question_type":"true_or_false","difficulty":"easy","topic_tag":"units","correct_answer":"True","choices":null}]`,
     fill_in_the_blank:
@@ -201,11 +271,13 @@ function buildPrompt(
       `[{"question_text":"Match each term to its correct definition.","question_type":"matching","difficulty":"medium","topic_tag":"units","correct_answer":"meter|unit of length||kilogram|unit of mass||second|unit of time||ampere|unit of current","choices":null}]`,
   };
 
-  return `You are an exam question generator. Use ONLY facts from the source text below. Output only a JSON array.\n` +
+  return `You are an exam question generator. Your ONLY source of knowledge is the SOURCE text below. Do NOT use any facts, definitions, or details from outside this source.\n` +
+    `IMPORTANT: Write ALL questions, answers, and choices in ENGLISH only, regardless of the language of the source text.\n` +
     `\nSOURCE:\n"""\n${cleanedContent}\n"""\n` +
-    `${topic ? `\nTOPIC: ${topic}` : ''}` +
+    `${topic ? `\nTOPIC FOCUS: ${topic}` : ''}` +
     `\nDIFFICULTY: ${difficultyNote[cfg.difficulty]}` +
     `\nTASK: Generate ${typeInstructions[cfg.type]}` +
+    `\nRULES: Every question, answer, and distractor MUST be directly supported by the SOURCE above. Do not invent, assume, or recall anything not explicitly stated in the SOURCE.` +
     `${avoidSection}` +
     `\nRespond with ONLY a JSON array containing exactly ${n} object${plural ? 's' : ''}. Example:\n${examples[cfg.type]}` +
     `\nDo NOT include any text outside the JSON array.`;
@@ -324,7 +396,7 @@ function parseQuestions(
       let choices = q.choices ?? null;
       let correctAnswer = normalizeAnswer(cfg.type, String(q.correct_answer ?? ''));
 
-      // ── Normalize MCQ choices to [{key, text}] format ──────────────────────
+      // ── Normalize MCQ choices and resolve correct_answer to a key ──────────
       if (cfg.type === 'multiple_choice' && choices) {
         if (!Array.isArray(choices)) {
           // Object format: {"A":"Joule","B":"Newton",...} → array
@@ -348,6 +420,14 @@ function parseQuestions(
         }
       }
 
+      // If MCQ correct_answer is full text (not a letter), resolve it to the key
+      if (cfg.type === 'multiple_choice' && Array.isArray(choices) && !/^[A-D]$/i.test(correctAnswer)) {
+        const match = (choices as { key: string; text: string }[]).find(
+          c => c.text.toLowerCase().trim() === correctAnswer.toLowerCase().trim(),
+        );
+        if (match) correctAnswer = match.key;
+      }
+
       if (cfg.type === 'matching' && (!choices || (Array.isArray(choices) && choices.length === 0))) {
         const parsedPairs = parseMatchingPairs(correctAnswer);
         if (parsedPairs) {
@@ -356,7 +436,7 @@ function parseQuestions(
         }
       }
       return {
-        question_text:     q.question_text.trim(),
+        question_text:     q.question_text.trim().replace(/^['"]+|['"]+$/g, '').trim(),
         question_type:     cfg.type,
         difficulty:        cfg.difficulty,
         topic_tag:         normalizeTopicTag(q.topic_tag, cfg.type, topicFallback),

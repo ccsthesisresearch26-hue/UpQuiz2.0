@@ -20,7 +20,11 @@ func NewAttemptHandler(attemptRepo repository.AttemptRepository, scorer *service
 
 // POST /api/exams/:examID/attempt   — start or resume attempt
 func (h *AttemptHandler) StartAttempt(c *gin.Context) {
-	examID, _ := uuid.Parse(c.Param("examID"))
+	examID, err := uuid.Parse(c.Param("examID"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid exam id"})
+		return
+	}
 	studentID, _ := uuid.Parse(c.GetString("userID"))
 
 	attempt, err := h.attemptRepo.FindOrCreate(c.Request.Context(), examID, studentID)
@@ -33,7 +37,11 @@ func (h *AttemptHandler) StartAttempt(c *gin.Context) {
 
 // POST /api/attempts/:attemptID/answers   — save answers (auto-save)
 func (h *AttemptHandler) SaveAnswers(c *gin.Context) {
-	attemptID, _ := uuid.Parse(c.Param("attemptID"))
+	attemptID, err := uuid.Parse(c.Param("attemptID"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid attempt id"})
+		return
+	}
 	var body struct {
 		Answers []struct {
 			QuestionID string `json:"question_id"`
@@ -45,7 +53,11 @@ func (h *AttemptHandler) SaveAnswers(c *gin.Context) {
 		return
 	}
 	for _, a := range body.Answers {
-		qID, _ := uuid.Parse(a.QuestionID)
+		qID, err := uuid.Parse(a.QuestionID)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid question id"})
+			return
+		}
 		if err := h.attemptRepo.UpsertAnswer(c.Request.Context(), attemptID, qID, a.AnswerText); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -56,7 +68,11 @@ func (h *AttemptHandler) SaveAnswers(c *gin.Context) {
 
 // POST /api/attempts/:attemptID/submit
 func (h *AttemptHandler) Submit(c *gin.Context) {
-	attemptID, _ := uuid.Parse(c.Param("attemptID"))
+	attemptID, err := uuid.Parse(c.Param("attemptID"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid attempt id"})
+		return
+	}
 	studentID, _ := uuid.Parse(c.GetString("userID"))
 
 	result, err := h.scorer.ScoreAttempt(c.Request.Context(), attemptID, studentID)
@@ -69,7 +85,11 @@ func (h *AttemptHandler) Submit(c *gin.Context) {
 
 // GET /api/attempts/:attemptID
 func (h *AttemptHandler) GetAttempt(c *gin.Context) {
-	attemptID, _ := uuid.Parse(c.Param("attemptID"))
+	attemptID, err := uuid.Parse(c.Param("attemptID"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid attempt id"})
+		return
+	}
 	attempt, err := h.attemptRepo.FindByID(c.Request.Context(), attemptID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "attempt not found"})

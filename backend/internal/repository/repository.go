@@ -51,19 +51,23 @@ type QuestionRepository interface {
 	Approve(ctx context.Context, id uuid.UUID) error
 	Update(ctx context.Context, q *models.GeneratedQuestion) error
 	SoftDelete(ctx context.Context, id uuid.UUID) error
+	SetImageURL(ctx context.Context, id uuid.UUID, imageURL *string) error
 }
 
 // ─── Exam ─────────────────────────────────────────────────────────────────────
 
 type ExamRepository interface {
 	Create(ctx context.Context, subjectID, createdBy uuid.UUID, title, instructions string,
-		timeLimitMinutes *int, passingScore *float64, randomize bool, questionIDs []uuid.UUID) (*models.Exam, error)
+		timeLimitMinutes *int, passingScore *float64, randomize bool, questionIDs []uuid.UUID,
+		weights map[uuid.UUID]float64) (*models.Exam, error)
 	FindByID(ctx context.Context, id uuid.UUID) (*models.Exam, error)
 	ListBySubject(ctx context.Context, subjectID uuid.UUID) ([]*models.Exam, error)
 	ListPublishedForStudent(ctx context.Context, studentID uuid.UUID) ([]*models.Exam, error)
 	Update(ctx context.Context, id uuid.UUID, title, instructions string, timeLimitMinutes *int, passingScore *float64, randomize bool) error
 	UpdateStatus(ctx context.Context, id uuid.UUID, status models.ExamStatus) error
 	GetQuestions(ctx context.Context, examID uuid.UUID) ([]*models.GeneratedQuestion, error)
+	ReplaceQuestion(ctx context.Context, examID, oldQID, newQID uuid.UUID) error
+	UpdateQuestionPoints(ctx context.Context, examID, questionID uuid.UUID, points float64) error
 	Delete(ctx context.Context, id uuid.UUID) error
 }
 

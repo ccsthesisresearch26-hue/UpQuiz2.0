@@ -1,8 +1,8 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../../services/api';
 import Layout from '../../components/Layout';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { CheckCircle2, Clock, Save, Send, Loader2, BookOpen } from 'lucide-react';
 
 interface MCQChoice { key: string; text: string; }
@@ -35,20 +35,15 @@ interface Question {
   question_text: string;
   question_type: string;
   choices?: MCQChoice[] | MatchPair[] | null;
+  image_url?: string | null;
 }
 interface Attempt { id: string; status: string; }
 
 export default function TakeExamPage() {
   const { examId } = useParams<{ examId: string }>();
   const navigate = useNavigate();
-  const qc = useQueryClient();
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState(false);
-
-  // Track which question IDs have already been sent to fill-choices
-  // (prevents re-triggering on every re-render)
-  const attemptedFillIds = useRef<Set<string>>(new Set());
-  const [fillingIds, setFillingIds] = useState<Set<string>>(new Set());
 
   const { data: attempt } = useQuery<Attempt>({
     queryKey: ['attempt', examId],
@@ -66,30 +61,6 @@ export default function TakeExamPage() {
     const id = setInterval(() => saveAnswers(), 30_000);
     return () => clearInterval(id);
   }, [attempt, answers]);
-
-  // Auto-fill MCQ choices if any are missing (handles exams published before fill-choices ran)
-  useEffect(() => {
-    if (!questions.length) return;
-    const missing = questions.filter(q =>
-      q.question_type === 'multiple_choice' &&
-      (!q.choices || (q.choices as MCQChoice[]).length === 0) &&
-      !attemptedFillIds.current.has(q.id),
-    );
-    if (!missing.length) return;
-
-    // Mark as attempted immediately so subsequent renders don't re-trigger
-    missing.forEach(q => attemptedFillIds.current.add(q.id));
-    setFillingIds(prev => new Set([...prev, ...missing.map(q => q.id)]));
-
-    (async () => {
-      for (const q of missing) {
-        try { await api.post(`/questions/${q.id}/fill-choices`); } catch { /* best-effort */ }
-        setFillingIds(prev => { const n = new Set(prev); n.delete(q.id); return n; });
-      }
-      // Refresh exam questions so newly filled choices are shown
-      qc.invalidateQueries({ queryKey: ['exam-questions', examId] });
-    })();
-  }, [questions.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const saveAnswers = async () => {
     if (!attempt) return;
@@ -196,21 +167,20 @@ export default function TakeExamPage() {
                   ${answered ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
                   {answered ? <CheckCircle2 className="w-4 h-4" /> : i + 1}
                 </div>
-                <p className="font-medium text-slate-800 leading-relaxed">{q.question_text}</p>
+                <div className="flex-1">
+                  <p className="font-medium text-slate-800 leading-relaxed">{q.question_text}</p>
+                  {q.image_url && (
+                    <img src={q.image_url} alt="Question context"
+                      className="rounded-lg max-h-64 w-auto object-contain border border-slate-100 bg-slate-50 mt-2" />
+                  )}
+                </div>
               </div>
 
               {/* ── Multiple Choice ── */}
               {q.question_type === 'multiple_choice' && (
                 <div className="space-y-2 ml-10">
                   {mcqChoices.length === 0 ? (
-                    fillingIds.has(q.id) ? (
-                      <div className="flex items-center gap-2 py-2 text-sm text-primary-600">
-                        <Loader2 className="w-4 h-4 animate-spin flex-shrink-0" />
-                        Generating answer choices…
-                      </div>
-                    ) : (
-                      <p className="text-xs text-slate-400 italic">Choices are still being generated — please refresh in a moment.</p>
-                    )
+                    <p className="text-xs text-slate-400 italic">Choices are not available yet. Please ask your educator to update this exam.</p>
                   ) : (
                     mcqChoices.map(c => {
                       const selected = answers[q.id] === c.key;

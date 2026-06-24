@@ -33,6 +33,11 @@ func (h *DocumentHandler) Upload(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "subject_id is required"})
 		return
 	}
+	sID, err := uuid.Parse(subjectID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid subject_id"})
+		return
+	}
 
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
@@ -65,7 +70,6 @@ func (h *DocumentHandler) Upload(c *gin.Context) {
 		return
 	}
 
-	sID, _ := uuid.Parse(subjectID)
 	uID, _ := uuid.Parse(userID.(string))
 
 	doc, err := h.docRepo.Create(c.Request.Context(), sID, uID, header.Filename, storedPath, header.Size)

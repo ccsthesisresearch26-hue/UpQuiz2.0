@@ -18,13 +18,14 @@ func NewExamHandler(examRepo repository.ExamRepository) *ExamHandler {
 }
 
 type createExamRequest struct {
-	SubjectID           string   `json:"subject_id"           binding:"required"`
-	Title               string   `json:"title"                binding:"required"`
-	Instructions        string   `json:"instructions"`
-	TimeLimitMinutes    *int     `json:"time_limit_minutes"`
-	PassingScore        *float64 `json:"passing_score"`
-	RandomizeQuestions  bool     `json:"randomize_questions"`
-	QuestionIDs         []string `json:"question_ids"         binding:"required,min=1"`
+	SubjectID           string             `json:"subject_id"        binding:"required"`
+	Title               string             `json:"title"             binding:"required"`
+	Instructions        string             `json:"instructions"`
+	TimeLimitMinutes    *int               `json:"time_limit_minutes"`
+	PassingScore        *float64           `json:"passing_score"`
+	RandomizeQuestions  bool               `json:"randomize_questions"`
+	QuestionIDs         []string           `json:"question_ids"      binding:"required,min=1"`
+	QuestionWeights     map[string]float64 `json:"question_weights"` // optional: questionID -> points
 }
 
 // POST /api/exams
@@ -35,7 +36,11 @@ func (h *ExamHandler) Create(c *gin.Context) {
 		return
 	}
 
-	subjectID, _ := uuid.Parse(req.SubjectID)
+	subjectID, err := uuid.Parse(req.SubjectID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid subject_id"})
+		return
+	}
 	createdBy, _ := uuid.Parse(c.GetString("userID"))
 
 	questionUUIDs := make([]uuid.UUID, 0, len(req.QuestionIDs))
@@ -48,8 +53,16 @@ func (h *ExamHandler) Create(c *gin.Context) {
 		questionUUIDs = append(questionUUIDs, uid)
 	}
 
+	weights := make(map[uuid.UUID]float64, len(req.QuestionWeights))
+	for k, v := range req.QuestionWeights {
+		uid, err := uuid.Parse(k)
+		if err == nil {
+			weights[uid] = v
+		}
+	}
+
 	exam, err := h.examRepo.Create(c.Request.Context(), subjectID, createdBy, req.Title, req.Instructions,
-		req.TimeLimitMinutes, req.PassingScore, req.RandomizeQuestions, questionUUIDs)
+		req.TimeLimitMinutes, req.PassingScore, req.RandomizeQuestions, questionUUIDs, weights)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -74,7 +87,11 @@ func (h *ExamHandler) GetByID(c *gin.Context) {
 
 // PATCH /api/exams/:id/status
 func (h *ExamHandler) UpdateStatus(c *gin.Context) {
-	id, _ := uuid.Parse(c.Param("id"))
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid exam id"})
+		return
+	}
 	var body struct {
 		Status models.ExamStatus `json:"status" binding:"required,oneof=draft published closed"`
 	}
@@ -159,6 +176,64 @@ func (h *ExamHandler) Update(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "exam updated"})
+}
+
+// PATCH /api/exams/:id/questions  — replace one question with another from the bank
+func (h *ExamHandler) ReplaceQuestion(c *gin.Context) {
+	examID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid exam id"})
+		return
+	}
+	var body struct {
+		OldQuestionID string `json:"old_question_id" binding:"required"`
+		NewQuestionID string `json:"new_question_id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	oldQID, err := uuid.Parse(body.OldQuestionID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid old_question_id"})
+		return
+	}
+	newQID, err := uuid.Parse(body.NewQuestionID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid new_question_id"})
+		return
+	}
+	if err := h.examRepo.ReplaceQuestion(c.Request.Context(), examID, oldQID, newQID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "question replaced"})
+}
+
+// PATCH /api/exams/:id/questions/:questionId/points
+func (h *ExamHandler) UpdateQuestionPoints(c *gin.Context) {
+	examID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid exam id"})
+		return
+	}
+	questionID, err := uuid.Parse(c.Param("questionId"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid question id"})
+		return
+	}
+	var body struct {
+		Points float64 `json:"points" binding:"required,min=0.5"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := h.examRepo.UpdateQuestionPoints(c.Request.Context(), examID, questionID, body.Points); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"points": body.Points})
 }
 
 // GET /api/exams/:id/questions

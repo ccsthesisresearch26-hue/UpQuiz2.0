@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/ccsthesis/examplatform/internal/models"
@@ -14,7 +15,8 @@ type examRepo struct{ db *pgxpool.Pool }
 func NewExamRepo(db *pgxpool.Pool) ExamRepository { return &examRepo{db: db} }
 
 func (r *examRepo) Create(ctx context.Context, subjectID, createdBy uuid.UUID, title, instructions string,
-	timeLimitMinutes *int, passingScore *float64, randomize bool, questionIDs []uuid.UUID) (*models.Exam, error) {
+	timeLimitMinutes *int, passingScore *float64, randomize bool, questionIDs []uuid.UUID,
+	weights map[uuid.UUID]float64) (*models.Exam, error) {
 
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
@@ -36,9 +38,15 @@ func (r *examRepo) Create(ctx context.Context, subjectID, createdBy uuid.UUID, t
 	}
 
 	for pos, qID := range questionIDs {
+		pts := 1.0
+		if weights != nil {
+			if w, ok := weights[qID]; ok {
+				pts = w
+			}
+		}
 		_, err = tx.Exec(ctx,
-			`INSERT INTO exam_questions(exam_id,question_id,position) VALUES($1,$2,$3)`,
-			exam.ID, qID, pos+1)
+			`INSERT INTO exam_questions(exam_id,question_id,position,points) VALUES($1,$2,$3,$4)`,
+			exam.ID, qID, pos+1, pts)
 		if err != nil {
 			return nil, fmt.Errorf("insert exam_question: %w", err)
 		}
@@ -92,13 +100,19 @@ func (r *examRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status models
 }
 
 func (r *examRepo) Delete(ctx context.Context, id uuid.UUID) error {
-	_, err := r.db.Exec(ctx, `DELETE FROM exams WHERE id=$1`, id)
-	return err
+	tag, err := r.db.Exec(ctx, `DELETE FROM exams WHERE id=$1`, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("exam not found")
+	}
+	return nil
 }
 
 func (r *examRepo) GetQuestions(ctx context.Context, examID uuid.UUID) ([]*models.GeneratedQuestion, error) {
 	rows, err := r.db.Query(ctx,
-		`SELECT gq.id,gq.question_text,gq.question_type,gq.difficulty,gq.topic_tag,gq.correct_answer,gq.choices
+		`SELECT gq.id,gq.question_text,gq.question_type,gq.difficulty,gq.topic_tag,gq.correct_answer,gq.choices,eq.points
 		 FROM generated_questions gq
 		 JOIN exam_questions eq ON eq.question_id=gq.id
 		 WHERE eq.exam_id=$1 ORDER BY eq.position`, examID)
@@ -109,13 +123,31 @@ func (r *examRepo) GetQuestions(ctx context.Context, examID uuid.UUID) ([]*model
 	var qs []*models.GeneratedQuestion
 	for rows.Next() {
 		q := &models.GeneratedQuestion{}
+		var choicesJSON []byte
 		if err := rows.Scan(&q.ID, &q.QuestionText, &q.QuestionType, &q.Difficulty,
-			&q.TopicTag, &q.CorrectAnswer, &q.Choices); err != nil {
+			&q.TopicTag, &q.CorrectAnswer, &choicesJSON, &q.Points); err != nil {
 			return nil, err
+		}
+		if len(choicesJSON) > 0 {
+			_ = json.Unmarshal(choicesJSON, &q.Choices)
 		}
 		qs = append(qs, q)
 	}
 	return qs, nil
+}
+
+func (r *examRepo) ReplaceQuestion(ctx context.Context, examID, oldQID, newQID uuid.UUID) error {
+	_, err := r.db.Exec(ctx,
+		`UPDATE exam_questions SET question_id=$3 WHERE exam_id=$1 AND question_id=$2`,
+		examID, oldQID, newQID)
+	return err
+}
+
+func (r *examRepo) UpdateQuestionPoints(ctx context.Context, examID, questionID uuid.UUID, points float64) error {
+	_, err := r.db.Exec(ctx,
+		`UPDATE exam_questions SET points=$3 WHERE exam_id=$1 AND question_id=$2`,
+		examID, questionID, points)
+	return err
 }
 
 // ListPublishedForStudent returns all published exams for subjects the student is enrolled in.
